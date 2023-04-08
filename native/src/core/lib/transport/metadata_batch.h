@@ -45,7 +45,9 @@
 #include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/slice/slice.h"
+#include "src/core/lib/transport/custom_metadata.h"
 #include "src/core/lib/transport/parsed_metadata.h"
+#include "src/core/lib/transport/simple_slice_based_metadata.h"
 
 namespace grpc_core {
 
@@ -225,22 +227,6 @@ struct GrpcAcceptEncodingMetadata {
   static absl::string_view DisplayValue(ValueType x) { return x.ToString(); }
   static absl::string_view DisplayMemento(MementoType x) {
     return DisplayValue(x);
-  }
-};
-
-struct SimpleSliceBasedMetadata {
-  using ValueType = Slice;
-  using MementoType = Slice;
-  static MementoType ParseMemento(Slice value, MetadataParseErrorFn) {
-    return value.TakeOwned();
-  }
-  static ValueType MementoToValue(MementoType value) { return value; }
-  static Slice Encode(const ValueType& x) { return x.Ref(); }
-  static absl::string_view DisplayValue(const ValueType& value) {
-    return value.as_string_view();
-  }
-  static absl::string_view DisplayMemento(const MementoType& value) {
-    return value.as_string_view();
   }
 };
 
@@ -436,6 +422,15 @@ struct GrpcStatusContext {
 // Annotation added by a transport to note that the status came from the wire.
 struct GrpcStatusFromWire {
   static absl::string_view DebugKey() { return "GrpcStatusFromWire"; }
+  static constexpr bool kRepeatable = false;
+  using ValueType = bool;
+  static absl::string_view DisplayValue(bool x) { return x ? "true" : "false"; }
+};
+
+// Annotation to denote that this call qualifies for cancelled=1 for the
+// RECV_CLOSE_ON_SERVER op
+struct GrpcCallWasCancelled {
+  static absl::string_view DebugKey() { return "GrpcCallWasCancelled"; }
   static constexpr bool kRepeatable = false;
   using ValueType = bool;
   static absl::string_view DisplayValue(bool x) { return x ? "true" : "false"; }
@@ -1260,8 +1255,6 @@ class MetadataMap {
 
   // Parse metadata from a key/value pair, and return an object representing
   // that result.
-  // TODO(ctiller): key should probably be an absl::string_view.
-  // Once we don't care about interning anymore, make that change!
   static ParsedMetadata<Derived> Parse(absl::string_view key, Slice value,
                                        uint32_t transport_size,
                                        MetadataParseErrorFn on_error) {
@@ -1378,7 +1371,9 @@ using grpc_metadata_batch_base = grpc_core::MetadataMap<
     // Non-encodable things
     grpc_core::GrpcStreamNetworkState, grpc_core::PeerString,
     grpc_core::GrpcStatusContext, grpc_core::GrpcStatusFromWire,
-    grpc_core::WaitForReady, grpc_core::GrpcTrailersOnly>;
+    grpc_core::GrpcCallWasCancelled, grpc_core::WaitForReady,
+    grpc_core::GrpcTrailersOnly GRPC_CUSTOM_CLIENT_METADATA
+        GRPC_CUSTOM_SERVER_METADATA>;
 
 struct grpc_metadata_batch : public grpc_metadata_batch_base {
   using grpc_metadata_batch_base::grpc_metadata_batch_base;

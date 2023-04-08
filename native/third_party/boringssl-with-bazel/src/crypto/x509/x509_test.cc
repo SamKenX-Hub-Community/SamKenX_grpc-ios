@@ -4134,6 +4134,48 @@ soBsxWI=
 -----END CERTIFICATE-----
 )";
 
+// kNonMinimalLengthOuter is an X.509 certificate where the outermost SEQUENCE
+// has a non-minimal length.
+static const char kNonMinimalLengthOuter[] = R"(
+-----BEGIN CERTIFICATE-----
+MIMAASAwgcagAwIBAgICBNIwCgYIKoZIzj0EAwIwDzENMAsGA1UEAxMEVGVzdDAg
+Fw0wMDAxMDEwMDAwMDBaGA8yMTAwMDEwMTAwMDAwMFowDzENMAsGA1UEAxMEVGVz
+dDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABOYraeK/ZZ+Xvi8eDZSKTNWXa7ep
+Hg1G+92pqR6d3LpaAefWl6gKGPnDxKMeVuJ8g0jbFhoc9R1+8ZQtS89yIsGjEDAO
+MAwGA1UdEwQFMAMBAf8wCgYIKoZIzj0EAwIDSQAwRgIhAKnSIhfmzfQpeOKFHiAq
+cml3ex6oaVVGoJWCsPQoZjVAAiEAqTHS9HzZBTQ20cMPXUpf8u5AXZP7adeh4qnk
+soBsxWI=
+-----END CERTIFICATE-----
+)";
+
+// kNonMinimalLengthSignature is an X.509 certificate where the signature has a
+// non-minimal length.
+static const char kNonMinimalLengthSignature[] = R"(
+-----BEGIN CERTIFICATE-----
+MIIBITCBxqADAgECAgIE0jAKBggqhkjOPQQDAjAPMQ0wCwYDVQQDEwRUZXN0MCAX
+DTAwMDEwMTAwMDAwMFoYDzIxMDAwMTAxMDAwMDAwWjAPMQ0wCwYDVQQDEwRUZXN0
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE5itp4r9ln5e+Lx4NlIpM1Zdrt6ke
+DUb73ampHp3culoB59aXqAoY+cPEox5W4nyDSNsWGhz1HX7xlC1Lz3IiwaMQMA4w
+DAYDVR0TBAUwAwEB/zAKBggqhkjOPQQDAgOBSQAwRgIhAKnSIhfmzfQpeOKFHiAq
+cml3ex6oaVVGoJWCsPQoZjVAAiEAqTHS9HzZBTQ20cMPXUpf8u5AXZP7adeh4qnk
+soBsxWI=
+-----END CERTIFICATE-----
+)";
+
+// kNonMinimalLengthSerial is an X.509 certificate where the serial number has a
+// non-minimal length.
+static const char kNonMinimalLengthSerial[] = R"(
+-----BEGIN CERTIFICATE-----
+MIIBITCBx6ADAgECAoECBNIwCgYIKoZIzj0EAwIwDzENMAsGA1UEAxMEVGVzdDAg
+Fw0wMDAxMDEwMDAwMDBaGA8yMTAwMDEwMTAwMDAwMFowDzENMAsGA1UEAxMEVGVz
+dDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABOYraeK/ZZ+Xvi8eDZSKTNWXa7ep
+Hg1G+92pqR6d3LpaAefWl6gKGPnDxKMeVuJ8g0jbFhoc9R1+8ZQtS89yIsGjEDAO
+MAwGA1UdEwQFMAMBAf8wCgYIKoZIzj0EAwIDSQAwRgIhAKnSIhfmzfQpeOKFHiAq
+cml3ex6oaVVGoJWCsPQoZjVAAiEAqTHS9HzZBTQ20cMPXUpf8u5AXZP7adeh4qnk
+soBsxWI=
+-----END CERTIFICATE-----
+)";
+
 TEST(X509Test, BER) {
   // Constructed strings are forbidden in DER.
   EXPECT_FALSE(CertFromPEM(kConstructedBitString));
@@ -4145,6 +4187,12 @@ TEST(X509Test, BER) {
   // Tags must be minimal in both BER and DER, though many BER decoders
   // incorrectly support non-minimal tags.
   EXPECT_FALSE(CertFromPEM(kHighTagNumber));
+  // Lengths must be minimal in DER.
+  EXPECT_FALSE(CertFromPEM(kNonMinimalLengthOuter));
+  EXPECT_FALSE(CertFromPEM(kNonMinimalLengthSerial));
+  // We, for now, accept a non-minimal length in the signature field. See
+  // b/18228011.
+  EXPECT_TRUE(CertFromPEM(kNonMinimalLengthSignature));
 }
 
 TEST(X509Test, Names) {
@@ -6413,4 +6461,84 @@ TEST(X509Test, AddUnserializableExtension) {
   bssl::UniquePtr<X509_EXTENSION> ext(X509_EXTENSION_new());
   ASSERT_TRUE(X509_EXTENSION_set_object(ext.get(), OBJ_nid2obj(NID_undef)));
   EXPECT_FALSE(X509_add_ext(x509.get(), ext.get(), /*loc=*/-1));
+}
+
+// Test that, when constructing an |X509_NAME|, names are sorted by DER order.
+TEST(X509Test, SortRDN) {
+  bssl::UniquePtr<X509_NAME> name(X509_NAME_new());
+  ASSERT_TRUE(name);
+
+  auto append_entry_new_rdn = [&](const char *str) {
+    return X509_NAME_add_entry_by_NID(name.get(), NID_commonName, MBSTRING_ASC,
+                                      reinterpret_cast<const uint8_t *>(str),
+                                      strlen(str), /*loc=*/-1, /*set=*/0);
+  };
+  auto append_entry_prev_rdn = [&](const char *str) {
+    return X509_NAME_add_entry_by_NID(name.get(), NID_commonName, MBSTRING_ASC,
+                                      reinterpret_cast<const uint8_t *>(str),
+                                      strlen(str), /*loc=*/-1, /*set=*/-1);
+  };
+
+  // This is the sort order to expect.
+  ASSERT_TRUE(append_entry_new_rdn("A"));
+  ASSERT_TRUE(append_entry_prev_rdn("B"));
+  ASSERT_TRUE(append_entry_prev_rdn("AA"));
+  ASSERT_TRUE(append_entry_prev_rdn("AB"));
+
+  // The same RDN, with entries added in a different order.
+  ASSERT_TRUE(append_entry_new_rdn("AB"));
+  ASSERT_TRUE(append_entry_prev_rdn("AA"));
+  ASSERT_TRUE(append_entry_prev_rdn("B"));
+  ASSERT_TRUE(append_entry_prev_rdn("A"));
+
+  // The same RDN, with entries added in a different order.
+  ASSERT_TRUE(append_entry_new_rdn("A"));
+  ASSERT_TRUE(append_entry_prev_rdn("AA"));
+  ASSERT_TRUE(append_entry_prev_rdn("B"));
+  ASSERT_TRUE(append_entry_prev_rdn("AB"));
+
+  uint8_t *der = nullptr;
+  int der_len = i2d_X509_NAME(name.get(), &der);
+  ASSERT_GT(der_len, 0);
+  bssl::UniquePtr<uint8_t> free_der(der);
+
+  // SEQUENCE {
+  //   SET {
+  //     SEQUENCE {
+  //       # commonName
+  //       OBJECT_IDENTIFIER { 2.5.4.3 }
+  //       UTF8String { "A" }
+  //     }
+  //     SEQUENCE {
+  //       # commonName
+  //       OBJECT_IDENTIFIER { 2.5.4.3 }
+  //       UTF8String { "B" }
+  //     }
+  //     SEQUENCE {
+  //       # commonName
+  //       OBJECT_IDENTIFIER { 2.5.4.3 }
+  //       UTF8String { "AA" }
+  //     }
+  //     SEQUENCE {
+  //       # commonName
+  //       OBJECT_IDENTIFIER { 2.5.4.3 }
+  //       UTF8String { "AB" }
+  //     }
+  //   }
+  //   ...two more copies of the above SET...
+  // }
+  static uint8_t kExpected[] = {
+      0x30, 0x81, 0x84, 0x31, 0x2a, 0x30, 0x08, 0x06, 0x03, 0x55, 0x04, 0x03,
+      0x0c, 0x01, 0x41, 0x30, 0x08, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x01,
+      0x42, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x02, 0x41, 0x41,
+      0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x02, 0x41, 0x42, 0x31,
+      0x2a, 0x30, 0x08, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x01, 0x41, 0x30,
+      0x08, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x01, 0x42, 0x30, 0x09, 0x06,
+      0x03, 0x55, 0x04, 0x03, 0x0c, 0x02, 0x41, 0x41, 0x30, 0x09, 0x06, 0x03,
+      0x55, 0x04, 0x03, 0x0c, 0x02, 0x41, 0x42, 0x31, 0x2a, 0x30, 0x08, 0x06,
+      0x03, 0x55, 0x04, 0x03, 0x0c, 0x01, 0x41, 0x30, 0x08, 0x06, 0x03, 0x55,
+      0x04, 0x03, 0x0c, 0x01, 0x42, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x03,
+      0x0c, 0x02, 0x41, 0x41, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c,
+      0x02, 0x41, 0x42};
+  EXPECT_EQ(Bytes(kExpected), Bytes(der, der_len));
 }
